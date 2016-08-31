@@ -40,7 +40,7 @@
       <HintPath>..\packages\NUnit.3.2.0\lib\net45\nunit.framework.dll</HintPath>
     </Reference>
     <Reference Include="System.Interactive.Async">
-      <HintPath>..\packages\Ix-Async.1.2.5\lib\net45\System.Interactive.Async.dll</HintPath>
+      <HintPath>..\packages\System.Interactive.Async.3.0.0\lib\net45\System.Interactive.Async.dll</HintPath>
     </Reference>
     <Reference Include="nunitlite">
       <HintPath>..\packages\NUnitLite.3.2.0\lib\net45\nunitlite.dll</HintPath>
@@ -84,6 +84,12 @@
     <Compile Include="SanityTest.cs" />
     <Compile Include="HalfcloseTest.cs" />
     <Compile Include="NUnitMain.cs" />
+    <Compile Include="Internal\FakeNativeCall.cs" />
+    <Compile Include="Internal\AsyncCallServerTest.cs" />
+    <Compile Include="ShutdownHookServerTest.cs" />
+    <Compile Include="ShutdownHookPendingCallTest.cs" />
+    <Compile Include="ShutdownHookClientTest.cs" />
+    <Compile Include="AppDomainUnloadTest.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>
@@ -93,6 +99,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <None Include="Grpc.Core.Tests.project.json" />
     <None Include="packages.config">
       <SubType>Designer</SubType>
     </None>

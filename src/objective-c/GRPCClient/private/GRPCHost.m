@@ -36,7 +36,10 @@
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #import <GRPCClient/GRPCCall.h>
+#ifdef GRPC_COMPILE_WITH_CRONET
 #import <GRPCClient/GRPCCall+ChannelArg.h>
+#import <GRPCClient/GRPCCall+Cronet.h>
+#endif
 
 #import "GRPCChannel.h"
 #import "GRPCCompletionQueue.h"
@@ -46,7 +49,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 // TODO(jcanizales): Generate the version in a standalone header, from templates. Like
 // templates/src/core/surface/version.c.template .
-#define GRPC_OBJC_VERSION_STRING @"0.13.0"
+#define GRPC_OBJC_VERSION_STRING @"1.0.0"
+
+static NSMutableDictionary *kHostCache;
 
 @implementation GRPCHost {
   // TODO(mlumish): Investigate whether caching channels with strong links is a good idea.
@@ -79,13 +84,12 @@ NS_ASSUME_NONNULL_BEGIN
   }
 
   // Look up the GRPCHost in the cache.
-  static NSMutableDictionary *hostCache;
   static dispatch_once_t cacheInitialization;
   dispatch_once(&cacheInitialization, ^{
-    hostCache = [NSMutableDictionary dictionary];
+    kHostCache = [NSMutableDictionary dictionary];
   });
-  @synchronized(hostCache) {
-    GRPCHost *cachedHost = hostCache[address];
+  @synchronized(kHostCache) {
+    GRPCHost *cachedHost = kHostCache[address];
     if (cachedHost) {
       return cachedHost;
     }
@@ -93,10 +97,26 @@ NS_ASSUME_NONNULL_BEGIN
     if ((self = [super init])) {
       _address = address;
       _secure = YES;
-      hostCache[address] = self;
+      kHostCache[address] = self;
     }
   }
   return self;
+}
+
++ (void)flushChannelCache {
+  @synchronized(kHostCache) {
+    [kHostCache enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key,
+                                                    GRPCHost * _Nonnull host,
+                                                    BOOL * _Nonnull stop) {
+      [host disconnect];
+    }];
+  }
+}
+
++ (void)resetAllHostSettings {
+  @synchronized (kHostCache) {
+    kHostCache = [NSMutableDictionary dictionary];
+  }
 }
 
 - (nullable grpc_call *)unmanagedCallWithPath:(NSString *)path
@@ -195,20 +215,35 @@ NS_ASSUME_NONNULL_BEGIN
   if (_secure && _hostNameOverride) {
     args[@GRPC_SSL_TARGET_NAME_OVERRIDE_ARG] = _hostNameOverride;
   }
+
+  if (_responseSizeLimitOverride) {
+    args[@GRPC_ARG_MAX_MESSAGE_LENGTH] = _responseSizeLimitOverride;
+  }
   return args;
 }
 
 - (GRPCChannel *)newChannel {
   NSDictionary *args = [self channelArgs];
+#ifdef GRPC_COMPILE_WITH_CRONET
+  BOOL useCronet = [GRPCCall isUsingCronet];
+#endif
   if (_secure) {
       GRPCChannel *channel;
       @synchronized(self) {
         if (_channelCreds == nil) {
           [self setTLSPEMRootCerts:nil withPrivateKey:nil withCertChain:nil error:nil];
         }
-        channel = [GRPCChannel secureChannelWithHost:_address
-                                          credentials:_channelCreds
-                                          channelArgs:args];
+#ifdef GRPC_COMPILE_WITH_CRONET
+        if (useCronet) {
+          channel = [GRPCChannel secureCronetChannelWithHost:_address
+                                                 channelArgs:args];
+        } else
+#endif
+        {
+          channel = [GRPCChannel secureChannelWithHost:_address
+                                            credentials:_channelCreds
+                                            channelArgs:args];
+        }
       }
       return channel;
   } else {

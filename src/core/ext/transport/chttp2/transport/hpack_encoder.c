@@ -47,10 +47,10 @@
 
 #include "src/core/ext/transport/chttp2/transport/bin_encoder.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_table.h"
-#include "src/core/ext/transport/chttp2/transport/timeout_encoding.h"
 #include "src/core/ext/transport/chttp2/transport/varint.h"
 #include "src/core/lib/transport/metadata.h"
 #include "src/core/lib/transport/static_metadata.h"
+#include "src/core/lib/transport/timeout_encoding.h"
 
 #define HASH_FRAGMENT_1(x) ((x)&255)
 #define HASH_FRAGMENT_2(x) ((x >> 8) & 255)
@@ -62,6 +62,8 @@
 #define ONE_ON_ADD_PROBABILITY 128
 /* don't consider adding anything bigger than this to the hpack table */
 #define MAX_DECODER_SPACE_USAGE 512
+
+extern int grpc_http_trace;
 
 typedef struct {
   int is_first_frame;
@@ -454,9 +456,9 @@ static void hpack_enc(grpc_chttp2_hpack_compressor *c, grpc_mdelem *elem,
 
 static void deadline_enc(grpc_chttp2_hpack_compressor *c, gpr_timespec deadline,
                          framer_state *st) {
-  char timeout_str[GRPC_CHTTP2_TIMEOUT_ENCODE_MIN_BUFSIZE];
+  char timeout_str[GRPC_HTTP2_TIMEOUT_ENCODE_MIN_BUFSIZE];
   grpc_mdelem *mdelem;
-  grpc_chttp2_encode_timeout(
+  grpc_http2_encode_timeout(
       gpr_time_sub(deadline, gpr_now(deadline.clock_type)), timeout_str);
   mdelem = grpc_mdelem_from_metadata_strings(
       GRPC_MDSTR_GRPC_TIMEOUT, grpc_mdstr_from_string(timeout_str));
@@ -532,7 +534,9 @@ void grpc_chttp2_hpack_compressor_set_max_table_size(
     }
   }
   c->advertise_table_size_change = 1;
-  gpr_log(GPR_DEBUG, "set max table size from encoder to %d", max_table_size);
+  if (grpc_http_trace) {
+    gpr_log(GPR_DEBUG, "set max table size from encoder to %d", max_table_size);
+  }
 }
 
 void grpc_chttp2_encode_header(grpc_chttp2_hpack_compressor *c,

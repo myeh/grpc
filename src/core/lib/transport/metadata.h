@@ -37,6 +37,10 @@
 #include <grpc/support/slice.h>
 #include <grpc/support/useful.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* This file provides a mechanism for tracking metadata through the grpc stack.
    It's not intended for consumption outside of the library.
 
@@ -147,6 +151,10 @@ const char *grpc_mdstr_as_c_string(grpc_mdstr *s);
 
 #define GRPC_MDSTR_LENGTH(s) (GPR_SLICE_LENGTH(s->slice))
 
+/* We add 32 bytes of padding as per RFC-7540 section 6.5.2. */
+#define GRPC_MDELEM_LENGTH(e) \
+  (GRPC_MDSTR_LENGTH((e)->key) + GRPC_MDSTR_LENGTH((e)->value) + 32)
+
 int grpc_mdstr_is_legal_header(grpc_mdstr *s);
 int grpc_mdstr_is_legal_nonbin_header(grpc_mdstr *s);
 int grpc_mdstr_is_bin_suffixed(grpc_mdstr *s);
@@ -159,5 +167,9 @@ void grpc_mdctx_global_shutdown(void);
 /* Implementation provided by chttp2_transport */
 extern gpr_slice (*grpc_chttp2_base64_encode_and_huffman_compress)(
     gpr_slice input);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GRPC_CORE_LIB_TRANSPORT_METADATA_H */

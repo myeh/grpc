@@ -42,6 +42,19 @@ grpc_channel *grpc_channel_create(grpc_exec_ctx *exec_ctx, const char *target,
                                   grpc_channel_stack_type channel_stack_type,
                                   grpc_transport *optional_transport);
 
+/** Create a call given a grpc_channel, in order to call \a method.
+    Progress is tied to activity on \a pollset_set. The returned call object is
+    meant to be used with \a grpc_call_start_batch_and_execute, which relies on
+    callbacks to signal completions. \a method and \a host need
+    only live through the invocation of this function. If \a parent_call is
+    non-NULL, it must be a server-side call. It will be used to propagate
+    properties from the server call to this new client call, depending on the
+    value of \a propagation_mask (see propagation_bits.h for possible values) */
+grpc_call *grpc_channel_create_pollset_set_call(
+    grpc_channel *channel, grpc_call *parent_call, uint32_t propagation_mask,
+    grpc_pollset_set *pollset_set, const char *method, const char *host,
+    gpr_timespec deadline, void *reserved);
+
 /** Get a (borrowed) pointer to this channels underlying channel stack */
 grpc_channel_stack *grpc_channel_get_channel_stack(grpc_channel *channel);
 
@@ -70,5 +83,9 @@ void grpc_channel_internal_unref(grpc_exec_ctx *exec_ctx,
 #define GRPC_CHANNEL_INTERNAL_UNREF(exec_ctx, channel, reason) \
   grpc_channel_internal_unref(exec_ctx, channel)
 #endif
+
+/** Return the channel's compression options. */
+grpc_compression_options grpc_channel_compression_options(
+    const grpc_channel *channel);
 
 #endif /* GRPC_CORE_LIB_SURFACE_CHANNEL_H */

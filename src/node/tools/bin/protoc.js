@@ -43,12 +43,19 @@
 var path = require('path');
 var execFile = require('child_process').execFile;
 
-var protoc = path.resolve(__dirname, 'protoc');
+var exe_ext = process.platform === 'win32' ? '.exe' : '';
 
-execFile(protoc, process.argv.slice(2), function(error, stdout, stderr) {
+var protoc = path.resolve(__dirname, 'protoc' + exe_ext);
+
+var plugin = path.resolve(__dirname, 'grpc_node_plugin' + exe_ext);
+
+var args = ['--plugin=protoc-gen-grpc=' + plugin].concat(process.argv.slice(2));
+
+var child_process = execFile(protoc, args, function(error, stdout, stderr) {
   if (error) {
     throw error;
   }
-  console.log(stdout);
-  console.log(stderr);
 });
+
+child_process.stdout.pipe(process.stdout);
+child_process.stderr.pipe(process.stderr);

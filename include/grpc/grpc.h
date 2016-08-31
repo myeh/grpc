@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2015, Google Inc.
+ * Copyright 2015-2016, Google Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -90,6 +90,9 @@ GRPCAPI void grpc_shutdown(void);
 /** Return a string representing the current version of grpc */
 GRPCAPI const char *grpc_version_string(void);
 
+/** Return a string specifying what the 'g' in gRPC stands for */
+GRPCAPI const char *grpc_g_stands_for(void);
+
 /** Create a completion queue */
 GRPCAPI grpc_completion_queue *grpc_completion_queue_create(void *reserved);
 
@@ -170,8 +173,9 @@ GRPCAPI void grpc_channel_watch_connectivity_state(
     completions are sent to 'completion_queue'. 'method' and 'host' need only
     live through the invocation of this function.
     If parent_call is non-NULL, it must be a server-side call. It will be used
-    to propagate properties from the server call to this new client call.
-    */
+    to propagate properties from the server call to this new client call,
+    depending on the value of \a propagation_mask (see propagation_bits.h for
+    possible values). */
 GRPCAPI grpc_call *grpc_channel_create_call(
     grpc_channel *channel, grpc_call *parent_call, uint32_t propagation_mask,
     grpc_completion_queue *completion_queue, const char *method,
@@ -187,7 +191,8 @@ GRPCAPI void *grpc_channel_register_call(grpc_channel *channel,
                                          const char *method, const char *host,
                                          void *reserved);
 
-/** Create a call given a handle returned from grpc_channel_register_call */
+/** Create a call given a handle returned from grpc_channel_register_call.
+    \sa grpc_channel_create_call. */
 GRPCAPI grpc_call *grpc_channel_create_registered_call(
     grpc_channel *channel, grpc_call *parent_call, uint32_t propagation_mask,
     grpc_completion_queue *completion_queue, void *registered_call_handle,
@@ -333,6 +338,15 @@ GRPCAPI grpc_server *grpc_server_create(const grpc_channel_args *args,
 GRPCAPI void grpc_server_register_completion_queue(grpc_server *server,
                                                    grpc_completion_queue *cq,
                                                    void *reserved);
+
+/** Register a non-listening completion queue with the server. This API is
+    similar to grpc_server_register_completion_queue except that the server will
+    not use this completion_queue to listen to any incoming channels.
+
+    Registering a non-listening completion queue will have negative performance
+    impact and hence this API is not recommended for production use cases. */
+GRPCAPI void grpc_server_register_non_listening_completion_queue(
+    grpc_server *server, grpc_completion_queue *q, void *reserved);
 
 /** Add a HTTP2 over plaintext over tcp listener.
     Returns bound port number on success, 0 on failure.

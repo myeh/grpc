@@ -33,6 +33,7 @@
 
 #include "src/core/lib/transport/metadata_batch.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 #include <grpc/support/alloc.h>
@@ -187,8 +188,17 @@ void grpc_metadata_batch_clear(grpc_metadata_batch *batch) {
   grpc_metadata_batch_filter(batch, no_metadata_for_you, NULL);
 }
 
-int grpc_metadata_batch_is_empty(grpc_metadata_batch *batch) {
+bool grpc_metadata_batch_is_empty(grpc_metadata_batch *batch) {
   return batch->list.head == NULL &&
          gpr_time_cmp(gpr_inf_future(batch->deadline.clock_type),
                       batch->deadline) == 0;
+}
+
+size_t grpc_metadata_batch_size(grpc_metadata_batch *batch) {
+  size_t size = 0;
+  for (grpc_linked_mdelem *elem = batch->list.head; elem != NULL;
+       elem = elem->next) {
+    size += GRPC_MDELEM_LENGTH(elem->md);
+  }
+  return size;
 }

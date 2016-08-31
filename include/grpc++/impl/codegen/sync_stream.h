@@ -64,6 +64,15 @@ class ClientStreamingInterface {
   virtual Status Finish() = 0;
 };
 
+/// Common interface for all synchronous server side streaming.
+class ServerStreamingInterface {
+ public:
+  virtual ~ServerStreamingInterface() {}
+
+  /// Blocking send initial metadata to client.
+  virtual void SendInitialMetadata() = 0;
+};
+
 /// An interface that yields a sequence of messages of type \a R.
 template <class R>
 class ReaderInterface {
@@ -71,6 +80,9 @@ class ReaderInterface {
   virtual ~ReaderInterface() {}
 
   /// Blocking read a message and parse to \a msg. Returns \a true on success.
+  /// This is thread-safe with respect to \a Write or \WritesDone methods on
+  /// the same stream. It should not be called concurrently with another \a
+  /// Read on the same stream as the order of delivery will not be defined.
   ///
   /// \param[out] msg The read message.
   ///
@@ -87,6 +99,7 @@ class WriterInterface {
   virtual ~WriterInterface() {}
 
   /// Blocking write \a msg to the stream with options.
+  /// This is thread-safe with respect to \a Read
   ///
   /// \param msg The message to be written to the stream.
   /// \param options Options affecting the write operation.
@@ -95,6 +108,7 @@ class WriterInterface {
   virtual bool Write(const W& msg, const WriteOptions& options) = 0;
 
   /// Blocking write \a msg to the stream with default options.
+  /// This is thread-safe with respect to \a Read
   ///
   /// \param msg The message to be written to the stream.
   ///
@@ -174,7 +188,8 @@ class ClientWriterInterface : public ClientStreamingInterface,
                               public WriterInterface<W> {
  public:
   /// Half close writing from the client.
-  /// Block until writes are completed.
+  /// Block until currently-pending writes are completed.
+  /// Thread safe with respect to \a Read operations only
   ///
   /// \return Whether the writes were successful.
   virtual bool WritesDone() = 0;
@@ -189,6 +204,7 @@ class ClientWriter : public ClientWriterInterface<W> {
                ClientContext* context, R* response)
       : context_(context), call_(channel->CreateCall(method, context, &cq_)) {
     finish_ops_.RecvMessage(response);
+    finish_ops_.AllowNoMessage();
 
     CallOpSet<CallOpSendInitialMetadata> ops;
     ops.SendInitialMetadata(context->send_initial_metadata_,
@@ -256,7 +272,8 @@ class ClientReaderWriterInterface : public ClientStreamingInterface,
   /// the metadata will be available in ClientContext after the first read.
   virtual void WaitForInitialMetadata() = 0;
 
-  /// Block until writes are completed.
+  /// Block until currently-pending writes are completed.
+  /// Thread-safe with respect to \a Read
   ///
   /// \return Whether the writes were successful.
   virtual bool WritesDone() = 0;
@@ -328,17 +345,25 @@ class ClientReaderWriter GRPC_FINAL : public ClientReaderWriterInterface<W, R> {
   Call call_;
 };
 
+/// Server-side interface for streaming reads of message of type \a R.
 template <class R>
-class ServerReader GRPC_FINAL : public ReaderInterface<R> {
+class ServerReaderInterface : public ServerStreamingInterface,
+                              public ReaderInterface<R> {};
+
+template <class R>
+class ServerReader GRPC_FINAL : public ServerReaderInterface<R> {
  public:
   ServerReader(Call* call, ServerContext* ctx) : call_(call), ctx_(ctx) {}
 
-  void SendInitialMetadata() {
+  void SendInitialMetadata() GRPC_OVERRIDE {
     GPR_CODEGEN_ASSERT(!ctx_->sent_initial_metadata_);
 
     CallOpSet<CallOpSendInitialMetadata> ops;
     ops.SendInitialMetadata(ctx_->initial_metadata_,
                             ctx_->initial_metadata_flags());
+    if (ctx_->compression_level_set()) {
+      ops.set_compression_level(ctx_->compression_level());
+    }
     ctx_->sent_initial_metadata_ = true;
     call_->PerformOps(&ops);
     call_->cq()->Pluck(&ops);
@@ -356,17 +381,25 @@ class ServerReader GRPC_FINAL : public ReaderInterface<R> {
   ServerContext* const ctx_;
 };
 
+/// Server-side interface for streaming writes of message of type \a W.
 template <class W>
-class ServerWriter GRPC_FINAL : public WriterInterface<W> {
+class ServerWriterInterface : public ServerStreamingInterface,
+                              public WriterInterface<W> {};
+
+template <class W>
+class ServerWriter GRPC_FINAL : public ServerWriterInterface<W> {
  public:
   ServerWriter(Call* call, ServerContext* ctx) : call_(call), ctx_(ctx) {}
 
-  void SendInitialMetadata() {
+  void SendInitialMetadata() GRPC_OVERRIDE {
     GPR_CODEGEN_ASSERT(!ctx_->sent_initial_metadata_);
 
     CallOpSet<CallOpSendInitialMetadata> ops;
     ops.SendInitialMetadata(ctx_->initial_metadata_,
                             ctx_->initial_metadata_flags());
+    if (ctx_->compression_level_set()) {
+      ops.set_compression_level(ctx_->compression_level());
+    }
     ctx_->sent_initial_metadata_ = true;
     call_->PerformOps(&ops);
     call_->cq()->Pluck(&ops);
@@ -381,6 +414,9 @@ class ServerWriter GRPC_FINAL : public WriterInterface<W> {
     if (!ctx_->sent_initial_metadata_) {
       ops.SendInitialMetadata(ctx_->initial_metadata_,
                               ctx_->initial_metadata_flags());
+      if (ctx_->compression_level_set()) {
+        ops.set_compression_level(ctx_->compression_level());
+      }
       ctx_->sent_initial_metadata_ = true;
     }
     call_->PerformOps(&ops);
@@ -394,17 +430,24 @@ class ServerWriter GRPC_FINAL : public WriterInterface<W> {
 
 /// Server-side interface for bi-directional streaming.
 template <class W, class R>
-class ServerReaderWriter GRPC_FINAL : public WriterInterface<W>,
-                                      public ReaderInterface<R> {
+class ServerReaderWriterInterface : public ServerStreamingInterface,
+                                    public WriterInterface<W>,
+                                    public ReaderInterface<R> {};
+
+template <class W, class R>
+class ServerReaderWriter GRPC_FINAL : public ServerReaderWriterInterface<W, R> {
  public:
   ServerReaderWriter(Call* call, ServerContext* ctx) : call_(call), ctx_(ctx) {}
 
-  void SendInitialMetadata() {
+  void SendInitialMetadata() GRPC_OVERRIDE {
     GPR_CODEGEN_ASSERT(!ctx_->sent_initial_metadata_);
 
     CallOpSet<CallOpSendInitialMetadata> ops;
     ops.SendInitialMetadata(ctx_->initial_metadata_,
                             ctx_->initial_metadata_flags());
+    if (ctx_->compression_level_set()) {
+      ops.set_compression_level(ctx_->compression_level());
+    }
     ctx_->sent_initial_metadata_ = true;
     call_->PerformOps(&ops);
     call_->cq()->Pluck(&ops);
@@ -426,6 +469,9 @@ class ServerReaderWriter GRPC_FINAL : public WriterInterface<W>,
     if (!ctx_->sent_initial_metadata_) {
       ops.SendInitialMetadata(ctx_->initial_metadata_,
                               ctx_->initial_metadata_flags());
+      if (ctx_->compression_level_set()) {
+        ops.set_compression_level(ctx_->compression_level());
+      }
       ctx_->sent_initial_metadata_ = true;
     }
     call_->PerformOps(&ops);

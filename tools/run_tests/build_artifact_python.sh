@@ -32,36 +32,67 @@ set -ex
 
 cd $(dirname $0)/../..
 
-if [ "$SKIP_PIP_INSTALL" == "" ]
-then
-  pip install --upgrade six
-  # There's a bug in newer versions of setuptools (see
-  # https://bitbucket.org/pypa/setuptools/issues/503/pkg_resources_vendorpackagingrequirementsi)
-  pip install --upgrade 'setuptools==18'
-  pip install -rrequirements.txt
-fi
-
 export GRPC_PYTHON_USE_CUSTOM_BDIST=0
 export GRPC_PYTHON_BUILD_WITH_CYTHON=1
+export PYTHON=${PYTHON:-python}
+export PIP=${PIP:-pip}
+export AUDITWHEEL=${AUDITWHEEL:-auditwheel}
+
+# Because multiple builds run in parallel, some distutils file
+# operations may collide.  To avoid this, each build is run in
+# a temp directory
+mkdir -p artifacts
+ARTIFACT_DIR="$PWD/artifacts"
+BUILD_DIR=`mktemp -d "${TMPDIR:-/tmp}/pygrpc.XXXXXX"`
+trap "rm -rf $BUILD_DIR" EXIT
+cp -r * "$BUILD_DIR"
+cd "$BUILD_DIR"
 
 # Build the source distribution first because MANIFEST.in cannot override
 # exclusion of built shared objects among package resources (for some
 # inexplicable reason).
-${SETARCH_CMD} python setup.py  \
-    sdist
-
-# The bdist_wheel_grpc_custom command is finicky about command output ordering
-# and thus ought to be run in a shell command separate of others. Further, it
-# trashes the actual bdist_wheel output, so it should be run first so that
-# bdist_wheel may be run unmolested.
-${SETARCH_CMD} python setup.py  \
-    build_tagged_ext
+${SETARCH_CMD} ${PYTHON} setup.py sdist
 
 # Wheel has a bug where directories don't get excluded.
 # https://bitbucket.org/pypa/wheel/issues/99/cannot-exclude-directory
-${SETARCH_CMD} python setup.py  \
-    bdist_wheel
+${SETARCH_CMD} ${PYTHON} setup.py bdist_wheel
 
-mkdir -p artifacts
+# Build gRPC tools package distribution
+${PYTHON} tools/distrib/python/make_grpcio_tools.py
 
-cp -r dist/* artifacts
+# Build gRPC tools package source distribution
+${SETARCH_CMD} ${PYTHON} tools/distrib/python/grpcio_tools/setup.py sdist
+
+# Build gRPC tools package binary distribution
+${SETARCH_CMD} ${PYTHON} tools/distrib/python/grpcio_tools/setup.py bdist_wheel
+
+if [ "$BUILD_MANYLINUX_WHEEL" != "" ]
+then
+  for wheel in dist/*.whl; do
+    ${AUDITWHEEL} repair $wheel -w "$ARTIFACT_DIR"
+    rm $wheel
+  done
+  for wheel in tools/distrib/python/grpcio_tools/dist/*.whl; do
+    ${AUDITWHEEL} repair $wheel -w "$ARTIFACT_DIR"
+    rm $wheel
+  done
+fi
+
+# We need to use the built grpcio-tools/grpcio to compile the health proto
+# Wheels are not supported by setup_requires/dependency_links, so we
+# manually install the dependency.  Note we should only do this if we
+# are in a docker image or in a virtualenv.
+if [ "$BUILD_HEALTH_CHECKING" != "" ]
+then
+  ${PIP} install -rrequirements.txt
+  ${PIP} install grpcio --no-index --find-links "file://$ARTIFACT_DIR/"
+  ${PIP} install grpcio-tools --no-index --find-links "file://$ARTIFACT_DIR/"
+
+  # Build gRPC health check source distribution
+  ${SETARCH_CMD} ${PYTHON} src/python/grpcio_health_checking/setup.py \
+      preprocess build_package_protos sdist
+  cp -r src/python/grpcio_health_checking/dist/* "$ARTIFACT_DIR"
+fi
+
+cp -r dist/* "$ARTIFACT_DIR"
+cp -r tools/distrib/python/grpcio_tools/dist/* "$ARTIFACT_DIR"
